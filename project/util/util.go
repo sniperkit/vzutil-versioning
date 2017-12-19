@@ -24,13 +24,15 @@ import (
 	"strings"
 )
 
-var testPathRe = `^(?:[^/]+\/){%d}%s(?:(?:\/)|$){1}.*$`
+var testPathRe = `^%s\/%s(?:(?:\/)|$){1}.*$`
 
-func IsVendorPath(path string, prefixCount int) bool {
-	return regexp.MustCompile(fmt.Sprintf(testPathRe, prefixCount, `vendor`)).MatchString(path)
+func IsVendorPath(path string, folderLocation string) bool {
+	re := regexp.MustCompile(fmt.Sprintf(testPathRe, folderLocation, `vendor`))
+	return re.MatchString(path)
 }
-func IsDotGitPath(path string, prefixCount int) bool {
-	return regexp.MustCompile(fmt.Sprintf(testPathRe, prefixCount, `\.git`)).MatchString(path)
+func IsDotGitPath(path string, folderLocation string) bool {
+	re := regexp.MustCompile(fmt.Sprintf(testPathRe, folderLocation, `\.git`))
+	return re.MatchString(path)
 }
 
 func Exists(path string) (bool, error) {
@@ -44,8 +46,8 @@ func Exists(path string) (bool, error) {
 	return true, err
 }
 
-func RunCommand(name string, arg ...string) error {
-	return exec.Command(name, arg...).Run()
+func RunCommand(name string, arg ...string) ([]byte, error) {
+	return exec.Command(name, arg...).Output()
 }
 
 func GetJson(i interface{}) (string, error) {

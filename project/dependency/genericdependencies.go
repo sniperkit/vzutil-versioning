@@ -16,30 +16,11 @@ limitations under the License.
 package dependency
 
 import (
-	"regexp"
 	"strings"
-
-	lan "github.com/venicegeo/vzutil-versioning/project/language"
-	sha "github.com/venicegeo/vzutil-versioning/project/shastore"
 )
 
 type GenericDependencies []*GenericDependency
 
-func SwapShaVersions(shaStore sha.ShaStore, depss ...*GenericDependencies) {
-	for _, deps := range depss {
-		deps.SwapShaVersions(shaStore)
-	}
-}
-func CondenseBundles(bundles map[string][]string, depss ...*GenericDependencies) {
-	for _, deps := range depss {
-		deps.CondenseBundles(bundles)
-	}
-}
-func RemoveExceptions(exceptions []string, depss ...*GenericDependencies) {
-	for _, deps := range depss {
-		deps.RemoveExceptions(exceptions)
-	}
-}
 func RemoveExactDuplicates(depss ...*GenericDependencies) {
 	for _, deps := range depss {
 		deps.RemoveExactDuplicates()
@@ -89,100 +70,4 @@ func (deps *GenericDependencies) RemoveExactDuplicates() (dups GenericDependenci
 	}
 	*deps = filtered
 	return dups
-}
-func (deps *GenericDependencies) RemoveDuplicatesByProject() {
-	res := GenericDependencies{}
-	found := false
-	for _, dep := range *deps {
-		found = false
-		for _, resDep := range res {
-			if resDep.LanguageEquals(dep) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			res.Add(dep)
-		}
-	}
-	*deps = res
-}
-func (deps *GenericDependencies) SwapShaVersions(shaStore sha.ShaStore) {
-	for _, dep := range *deps {
-		if dep.language != lan.Go {
-			continue
-		}
-		for _, store := range shaStore {
-			if store.Sha == dep.version {
-				dep.version = store.Version
-				break
-			}
-		}
-	}
-}
-func (deps *GenericDependencies) CondenseBundles(bundles map[string][]string) {
-	sortedByProject := map[string]GenericDependencies{}
-	langs := map[string]lan.Language{}
-	for _, dep := range *deps {
-		if _, ok := sortedByProject[dep.project]; !ok {
-			sortedByProject[dep.project] = GenericDependencies{}
-		}
-		sortedByProject[dep.project] = append(sortedByProject[dep.project], dep)
-		if _, ok := langs[dep.project]; !ok {
-			langs[dep.project] = dep.language
-		}
-	}
-	res := GenericDependencies{}
-	for projectName, depends := range sortedByProject {
-		bundleCount := map[string]map[string]int{}
-		refined := GenericDependencies{}
-		for bundleName, _ := range bundles {
-			bundleCount[bundleName] = map[string]int{}
-		}
-		for _, dep := range depends {
-			found := false
-			for bundleName, depNames := range bundles {
-				for _, depName := range depNames {
-					if dep.name == depName {
-						bundleCount[bundleName][dep.version]++
-						found = true
-					}
-				}
-			}
-			if !found {
-				refined.Add(dep)
-			}
-		}
-		for bundleName, v := range bundleCount {
-			for version, count := range v {
-				if count > 0 {
-					refined.Add(NewGenericDependency(bundleName, version, projectName, langs[projectName]))
-				}
-			}
-		}
-		res = append(res, refined...)
-		//		sortedByProject[projectName] = refined
-	}
-	*deps = res
-}
-func (deps *GenericDependencies) RemoveExceptions(exceptions []string) {
-	re := []*regexp.Regexp{}
-	for _, str := range exceptions {
-		re = append(re, regexp.MustCompile(str))
-	}
-	res := GenericDependencies{}
-	add := true
-	for _, dep := range *deps {
-		add = true
-		for _, r := range re {
-			if r.MatchString(dep.name) {
-				add = false
-				break
-			}
-		}
-		if add {
-			res.Add(dep)
-		}
-	}
-	*deps = res
 }

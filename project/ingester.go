@@ -27,57 +27,38 @@ import (
 	"github.com/venicegeo/vzutil-versioning/project/ingest"
 	"github.com/venicegeo/vzutil-versioning/project/issue"
 	lan "github.com/venicegeo/vzutil-versioning/project/language"
-	"github.com/venicegeo/vzutil-versioning/project/states"
 
 	"gopkg.in/yaml.v2"
 )
 
 type Ingester struct {
-	Projects *Projects
+	project *Project
 }
+
+//func NewIngester(project *Project) *Ingester {
+//	return &Ingester{project}
+//}
 
 var re = regexp.MustCompile(`([^\/]+$)`)
 
-func (i *Ingester) IngestAll(prnt bool) (err error) {
-	ingestChan := make(chan error, len(*i.Projects))
-	combErr := ""
-	ingest := func(k string, v *Project) {
-		if err = v.findDepFiles(); err != nil {
-			ingestChan <- err
-			return
-		}
-		if prnt {
-			str := "Ingesting " + k
-			for _, loc := range v.DepLocations {
-				str += "\n  - " + loc
-			}
-			fmt.Println(str)
-		}
-		if errs := i.IngestProject(v); len(errs) != 0 {
-			errStr := errs[0].Error()
-			for i := 1; i < len(errs); i++ {
-				errStr += "\n" + errs[i].Error()
-			}
-			ingestChan <- fmt.Errorf("%s:%s", v.ComponentName, errStr)
-			return
-		}
-		ingestChan <- nil
+func Ingest(project *Project, prnt bool) (err error) {
+	i := Ingester{project}
+	if err = i.project.findDepFiles(); err != nil {
+		return err
 	}
-	for k, v := range *i.Projects {
-		if state.Async {
-			go ingest(k, v)
-		} else {
-			ingest(k, v)
+	if prnt {
+		str := "Ingesting " + i.project.FolderName
+		for _, loc := range i.project.DepLocations {
+			str += "\n  - " + loc
 		}
+		fmt.Println(str)
 	}
-	for j := 0; j < len(*i.Projects); j++ {
-		err := <-ingestChan
-		if err != nil {
-			combErr += err.Error() + "\n"
+	if errs := i.IngestProject(i.project); len(errs) != 0 {
+		errStr := errs[0].Error()
+		for i := 1; i < len(errs); i++ {
+			errStr += "\n" + errs[i].Error()
 		}
-	}
-	if combErr != "" {
-		return fmt.Errorf("%s", combErr)
+		return fmt.Errorf("%s:%s", i.project.FolderName, errStr)
 	}
 	return nil
 }
@@ -112,6 +93,7 @@ func (i *Ingester) IngestProject(p *Project) (errors []error) {
 			errors = append(errors, err)
 		}
 	}
+	deps.RemoveExactDuplicates()
 	p.Dependencies = deps
 	p.AddIssue(issues...)
 	return errors
@@ -152,7 +134,7 @@ func (i *Ingester) ingestJavaProject(p *Project) (dependency.GenericDependencies
 			return nil, nil, fmt.Errorf("ingestJavaProject %s unmarshal: %s", filePath, err.Error())
 		}
 		fileName := re.FindStringSubmatch(filePath)[0]
-		projectWrapper.SetProperties(strings.TrimSuffix(filePath, fileName), p.ComponentName)
+		projectWrapper.SetProperties(strings.TrimSuffix(filePath, fileName), p.FolderName)
 		poms.Add(&projectWrapper)
 	}
 	poms.BuildHierarchy(false)
@@ -170,7 +152,7 @@ func (i *Ingester) ingestJavaScriptFile(filePath string, p *Project) (dependency
 	if err = json.Unmarshal(data, &projectWrapper); err != nil {
 		return nil, nil, err
 	}
-	projectWrapper.SetProperties(p.FolderLocation, p.ComponentName)
+	projectWrapper.SetProperties(p.FolderLocation, p.FolderName)
 	return projectWrapper.GetResults()
 }
 
@@ -194,7 +176,7 @@ func (i *Ingester) ingestGoFile(filePath string, p *Project) (dependency.Generic
 		return nil, nil, err
 	}
 	projectWrapper := ingest.GoProjectWrapper{Yaml: &yml, Lock: &lock}
-	projectWrapper.SetProperties(p.FolderLocation, p.ComponentName)
+	projectWrapper.SetProperties(p.FolderLocation, p.FolderName)
 	return projectWrapper.GetResults()
 }
 
@@ -210,11 +192,11 @@ func (i *Ingester) ingestPythonFile(filePath string, p *Project) (dependency.Gen
 			devDat = []byte("")
 		}
 		projectWrapper := ingest.PipProjectWrapper{Filedat: reqDat, DevFileDat: devDat}
-		projectWrapper.SetProperties(p.FolderLocation, p.ComponentName)
+		projectWrapper.SetProperties(p.FolderLocation, p.FolderName)
 		return projectWrapper.GetResults()
 	} else {
 		projectWrapper := ingest.CondaProjectWrapper{Filedat: reqDat}
-		projectWrapper.SetProperties(p.FolderLocation, p.ComponentName)
+		projectWrapper.SetProperties(p.FolderLocation, p.FolderName)
 		return projectWrapper.GetResults()
 	}
 }

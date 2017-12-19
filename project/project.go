@@ -17,8 +17,8 @@ package project
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/venicegeo/vzutil-versioning/project/dependency"
@@ -27,84 +27,54 @@ import (
 	"github.com/venicegeo/vzutil-versioning/project/util"
 )
 
-type Projects map[string]*Project
-
-func (p *Projects) GetAllDependencies() dependency.GenericDependencies {
-	res := dependency.GenericDependencies{}
-	for _, proj := range *p {
-		res = append(res, proj.GetDependencies()...)
-	}
-	return res
-}
-
 type Project struct {
-	ProjectInfo
-	repoName       string
+	FolderName     string
 	FolderLocation string
+	Sha            string
 	Dependencies   dependency.GenericDependencies
 	DepLocations   []string
 	Issues         []*issue.Issue `json:"issues,omitempty"`
 }
 
-type ProjectInfo struct {
-	CloneUrl      string   `json:"cloneUrl"`
-	CloneBranch   string   `json:"cloneBranch"`
-	ComponentName string   `json:"componentName"`
-	WalkIgnore    []string `json:"walkIgnore"`
-}
+var folderNameRE = regexp.MustCompile(`\/?([^\/]+)\/?$`)
 
-func (pi *ProjectInfo) fix(repoName, cloneUrl string) {
-	if strings.TrimSpace(pi.ComponentName) == "" {
-		pi.ComponentName = repoName
+func NewProject(folderLocation string) (proj *Project, err error) {
+	folderName := folderNameRE.FindStringSubmatch(folderLocation)[1]
+	if folderLocation, err = filepath.Abs(folderLocation); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(pi.CloneUrl) == "" {
-		pi.CloneUrl = fixLocation(cloneUrl) + repoName
+	var currentDir string
+	var dat []byte
+	if currentDir, err = os.Getwd(); err != nil {
+		return nil, err
 	}
-}
-
-func NewProject(repoName string, projectInfo ProjectInfo, clonedLocation string) *Project {
-	proj := Project{ProjectInfo: projectInfo, repoName: repoName}
-	proj.SetLocation(clonedLocation)
-	return &proj
+	if err = os.Chdir(folderLocation); err != nil {
+		return nil, err
+	}
+	if dat, err = util.RunCommand("git", "rev-parse", "HEAD"); err != nil {
+		return nil, err
+	}
+	if err = os.Chdir(currentDir); err != nil {
+		return nil, err
+	}
+	proj = &Project{FolderName: folderName, FolderLocation: folderLocation, Sha: strings.TrimSpace(string(dat))}
+	return proj, nil
 }
 
 func (p *Project) GetDependencies() dependency.GenericDependencies {
 	return p.Dependencies
 }
 
-func (p *Project) SetLocation(location string) {
-	location = fixLocation(location)
-	location += fixLocation(p.repoName)
-	p.FolderLocation = location
-}
-
-func fixLocation(location string) string {
-	if !strings.HasSuffix(location, "/") && strings.TrimSpace(location) != "" {
-		location = location + "/"
-	}
-	return location
-}
-
-func (p *Project) CloneAndMove(cloneChan chan<- error) {
-	branch := strings.TrimSpace(p.CloneBranch)
-	if branch == "" {
-		branch = "master"
-	}
-	cloneChan <- exec.Command("git", "clone", "-b", branch, p.CloneUrl, p.FolderLocation).Run()
-}
-
 func (p *Project) findDepFiles() (err error) {
 	visit := func(path string, f os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 		if f.IsDir() {
 			return nil
 		}
-		if util.IsVendorPath(path, 2) {
+		if util.IsVendorPath(path, p.FolderLocation) || util.IsDotGitPath(path, p.FolderLocation) {
 			return nil
-		}
-		for _, ignore := range p.WalkIgnore {
-			if strings.HasPrefix(path, p.FolderLocation+fixLocation(ignore)) {
-				return nil
-			}
 		}
 		if _, ok := lan.FileToLang[f.Name()]; ok {
 			p.DepLocations = append(p.DepLocations, path)
